@@ -195,7 +195,9 @@ export default function Home() {
   useEffect(() => {
     Promise.all([loadConversations(), loadSettings()]).then(([loaded, loadedSettings]) => {
       setConversations(loaded);
-      setActiveId(loaded[0]?.id ?? null);
+      const latest = loaded[0];
+      const latestEndedWithProviderError = Boolean(latest?.messages.at(-1)?.error);
+      setActiveId(latestEndedWithProviderError ? null : (latest?.id ?? null));
       setSettings({ ...loadedSettings, sidebarCollapsed: window.innerWidth < 821 ? true : loadedSettings.sidebarCollapsed });
     }).catch(() => toast.error("تعذر استعادة البيانات المحلية."));
   }, []);
