@@ -21,6 +21,7 @@ import {
   LayoutPanelLeft,
   Loader2,
   Menu,
+  Mic,
   MessageSquarePlus,
   Moon,
   MoreHorizontal,
@@ -38,12 +39,14 @@ import {
   Sun,
   Trash2,
   Upload,
+  Volume2,
   X,
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import { chatWithProvider, checkProvider, discoverModels, providerMeta } from "@/lib/providers";
 import { downloadConversation, parseBackup } from "@/lib/exporters";
+import { extractLocalFileText, searchWikipedia, speakText, startSpeechRecognition, stopSpeaking, type WikiResult } from "@/lib/browser-features";
 import { clearLocalData, deleteConversation, loadConversations, loadSettings, saveConversation, saveSettings } from "@/lib/storage";
 import type { AppSettings, ChatMessage, Conversation, ModelInfo, ProviderConfig, ProviderId } from "@/lib/types";
 import { DEFAULT_PROVIDER_URLS, newId } from "@/lib/types";
@@ -116,7 +119,7 @@ const labels = {
   },
 } as const;
 
-type Panel = "none" | "providers" | "models" | "privacy" | "docs";
+type Panel = "none" | "providers" | "models" | "privacy" | "docs" | "tools";
 
 function makeConversation(): Conversation {
   const now = Date.now();
@@ -132,7 +135,7 @@ function ProviderBadge({ provider, compact = false }: { provider: ProviderId; co
   return <span className={`provider-badge ${meta.mode} ${compact ? "compact" : ""}`}><span className="provider-dot" />{meta.name}</span>;
 }
 
-function MessageBubble({ message, onCopy, onDelete, onEdit }: { message: ChatMessage; onCopy: () => void; onDelete: () => void; onEdit: () => void }) {
+function MessageBubble({ message, onCopy, onDelete, onEdit, onSpeak }: { message: ChatMessage; onCopy: () => void; onDelete: () => void; onEdit: () => void; onSpeak: () => void }) {
   const isUser = message.role === "user";
   return (
     <article className={`message-row ${isUser ? "user" : "assistant"}`}>
@@ -144,6 +147,7 @@ function MessageBubble({ message, onCopy, onDelete, onEdit }: { message: ChatMes
         </div>
         <div className="message-actions">
           <button onClick={onCopy} aria-label="نسخ"><Copy size={13} /> نسخ</button>
+          {!isUser && !message.error && <button onClick={onSpeak} aria-label="قراءة صوتية"><Volume2 size={13} /> صوت</button>}
           {isUser && <button onClick={onEdit} aria-label="تعديل"><Pencil size={13} /> تعديل</button>}
           <button onClick={onDelete} aria-label="حذف"><Trash2 size={13} /> حذف</button>
         </div>
@@ -178,6 +182,12 @@ export default function Home() {
   const [isSending, setIsSending] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<{ stop: () => void } | null>(null);
+  const [isListening, setIsListening] = useState(false);
+  const [toolsQuery, setToolsQuery] = useState("");
+  const [wikiResults, setWikiResults] = useState<WikiResult[]>([]);
+  const [toolsLoading, setToolsLoading] = useState(false);
   const t = labels[settings.locale];
 
   useEffect(() => {
@@ -306,6 +316,37 @@ export default function Home() {
     toast.success(t.copied);
   };
 
+  const readAloud = (text: string) => {
+    try { speakText(text, settings.locale === "ar" ? "ar-SA" : "en-US"); } catch (error) { toast.error(error instanceof Error ? error.message : "تعذر تشغيل الصوت."); }
+  };
+
+  const toggleListening = () => {
+    if (isListening) { recognitionRef.current?.stop(); setIsListening(false); return; }
+    try {
+      recognitionRef.current = startSpeechRecognition(settings.locale === "ar" ? "ar-SA" : "en-US", (text) => setMessage(text), () => { setIsListening(false); recognitionRef.current = null; });
+      setIsListening(true);
+    } catch (error) { toast.error(error instanceof Error ? error.message : "التعرف على الكلام غير متاح."); }
+  };
+
+  const importLocalFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const text = await extractLocalFileText(file);
+      if (!text) throw new Error("لم يتم العثور على نص قابل للقراءة في الملف.");
+      setMessage(`اقرأ الملف التالي ثم ساعدني في تحليله:\n\n[${file.name}]\n${text}`);
+      toast.success(`تم استخراج النص من ${file.name} محليًا.`);
+    } catch (error) { toast.error(error instanceof Error ? error.message : "تعذر قراءة الملف."); }
+  };
+
+  const runWikiSearch = async () => {
+    if (!toolsQuery.trim()) return;
+    setToolsLoading(true);
+    try { setWikiResults(await searchWikipedia(toolsQuery.trim(), settings.locale)); } catch (error) { toast.error(error instanceof Error ? error.message : "تعذر البحث."); }
+    finally { setToolsLoading(false); }
+  };
+
   const importBackup = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -345,6 +386,7 @@ export default function Home() {
           <button className={`nav-item ${panel === "providers" ? "selected" : ""}`} onClick={() => setPanel(panel === "providers" ? "none" : "providers")}><Settings2 size={17} /><span>{t.providers}</span><span className="nav-status-dot" /></button>
           <button className={`nav-item ${panel === "models" ? "selected" : ""}`} onClick={() => setPanel(panel === "models" ? "none" : "models")}><LayoutPanelLeft size={17} /><span>{t.models}</span></button>
           <button className={`nav-item ${panel === "privacy" ? "selected" : ""}`} onClick={() => setPanel(panel === "privacy" ? "none" : "privacy")}><ShieldCheck size={17} /><span>{t.privacy}</span></button>
+          <button className={`nav-item ${panel === "tools" ? "selected" : ""}`} onClick={() => setPanel(panel === "tools" ? "none" : "tools")}><Globe2 size={17} /><span>الأدوات المجانية</span></button>
           <button className={`nav-item ${panel === "docs" ? "selected" : ""}`} onClick={() => setPanel(panel === "docs" ? "none" : "docs")}><CircleHelp size={17} /><span>{t.docs}</span></button>
           <div className="sidebar-footnote"><span className="status-ring" />{t.freePath}</div>
         </div>
@@ -355,13 +397,14 @@ export default function Home() {
 
         <div className="workspace-body">
           <div className="workspace-content">
-            {!activeConversation || activeConversation.messages.length === 0 ? <div className="welcome-state"><div className="welcome-orbit"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><span className="welcome-mark"><Sparkles size={22} /></span></div><div className="eyebrow"><span /> NEUER AI / PRIVATE WORKSPACE</div><h1>{t.start}</h1><p>{t.startSub}</p><div className="quick-prompts"><button onClick={() => setMessage("لخّص لي فكرة في سطرين")}>لخّص فكرة بسرعة <ArrowDownToLine size={14} /></button><button onClick={() => setMessage("اكتب خطة عملية لمشروع جديد")}>اكتب خطة عملية <Zap size={14} /></button><button onClick={() => setMessage("اشرح لي مفهومًا مع مثال")}>اشرح مع مثال <Info size={14} /></button></div></div> : <div className="messages-scroll">{activeConversation.messages.map((item, index) => <div key={item.id}><MessageBubble message={item} onCopy={() => copyText(item.content)} onEdit={() => editMessage(item)} onDelete={() => deleteMessage(item)} />{item.role === "assistant" && index === activeConversation.messages.length - 1 && !isSending && !item.error && <button className="regenerate-button" onClick={() => submitMessage(activeConversation.messages[index - 1]?.content, true)}><RefreshCw size={13} /> {t.regenerate}</button>}</div>)}{isSending && <div className="typing-line"><span /><span /><span /> Neurer يعالج طلبك…</div>}</div>}
+            {!activeConversation || activeConversation.messages.length === 0 ? <div className="welcome-state"><div className="welcome-orbit"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><span className="welcome-mark"><Sparkles size={22} /></span></div><div className="eyebrow"><span /> NEUER AI / PRIVATE WORKSPACE</div><h1>{t.start}</h1><p>{t.startSub}</p><div className="quick-prompts"><button onClick={() => setMessage("لخّص لي فكرة في سطرين")}>لخّص فكرة بسرعة <ArrowDownToLine size={14} /></button><button onClick={() => setMessage("اكتب خطة عملية لمشروع جديد")}>اكتب خطة عملية <Zap size={14} /></button><button onClick={() => setMessage("اشرح لي مفهومًا مع مثال")}>اشرح مع مثال <Info size={14} /></button></div></div> : <div className="messages-scroll">{activeConversation.messages.map((item, index) => <div key={item.id}><MessageBubble message={item} onCopy={() => copyText(item.content)} onEdit={() => editMessage(item)} onDelete={() => deleteMessage(item)} onSpeak={() => readAloud(item.content)} />{item.role === "assistant" && index === activeConversation.messages.length - 1 && !isSending && !item.error && <button className="regenerate-button" onClick={() => submitMessage(activeConversation.messages[index - 1]?.content, true)}><RefreshCw size={13} /> {t.regenerate}</button>}</div>)}{isSending && <div className="typing-line"><span /><span /><span /> Neurer يعالج طلبك…</div>}</div>}
           </div>
 
-          <div className="composer-wrap"><div className="context-strip"><div className="context-select"><span className={`mode-icon ${providerMeta[selectedProvider].mode}`}><Bot size={14} /></span><select value={selectedProvider} onChange={(event) => setSelectedProvider(event.target.value as ProviderId)} aria-label={t.provider}><option value="ollama">Ollama · {t.local}</option><option value="openrouter">OpenRouter · {t.cloud}</option><option value="groq">Groq · {t.cloud}</option></select><ChevronDown size={14} /></div><div className="context-select model-select"><select value={selectedModel} onChange={(event) => setSelectedModels((current) => ({ ...current, [selectedProvider]: event.target.value }))} aria-label={t.model}><option value="">{t.chooseModel}</option>{currentModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</select><ChevronDown size={14} /></div><span className={`connection-label ${providerStates[selectedProvider].connected ? "online" : ""}`}><span />{providerStates[selectedProvider].connected ? t.connected : t.disconnected}</span><button className="tiny-action" onClick={() => checkConnection(selectedProvider)} disabled={providerStates[selectedProvider].checking} aria-label={t.check}>{providerStates[selectedProvider].checking ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}</button></div><form className="composer" onSubmit={(event) => { event.preventDefault(); void submitMessage(); }}><textarea value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submitMessage(); } }} placeholder={t.message} aria-label={t.message} rows={1} /><div className="composer-bottom"><span>Enter للإرسال · Shift + Enter لسطر جديد</span><button type={isSending ? "button" : "submit"} className={`send-button ${isSending ? "stop" : ""}`} onClick={isSending ? stopGeneration : undefined}>{isSending ? <><Square size={14} fill="currentColor" />{t.stop}</> : <><Send size={15} />{t.send}</>}</button></div></form><div className="composer-note"><ShieldCheck size={13} /> لا يتم حفظ مفاتيح API. تحقّق من حالة المزوّد قبل إرسال معلومات حساسة.</div></div>
+          <div className="composer-wrap"><div className="context-strip"><div className="context-select"><span className={`mode-icon ${providerMeta[selectedProvider].mode}`}><Bot size={14} /></span><select value={selectedProvider} onChange={(event) => setSelectedProvider(event.target.value as ProviderId)} aria-label={t.provider}><option value="ollama">Ollama · {t.local}</option><option value="openrouter">OpenRouter · {t.cloud}</option><option value="groq">Groq · {t.cloud}</option></select><ChevronDown size={14} /></div><div className="context-select model-select"><select value={selectedModel} onChange={(event) => setSelectedModels((current) => ({ ...current, [selectedProvider]: event.target.value }))} aria-label={t.model}><option value="">{t.chooseModel}</option>{currentModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</select><ChevronDown size={14} /></div><span className={`connection-label ${providerStates[selectedProvider].connected ? "online" : ""}`}><span />{providerStates[selectedProvider].connected ? t.connected : t.disconnected}</span><button className="tiny-action" onClick={() => checkConnection(selectedProvider)} disabled={providerStates[selectedProvider].checking} aria-label={t.check}>{providerStates[selectedProvider].checking ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}</button></div><form className="composer" onSubmit={(event) => { event.preventDefault(); void submitMessage(); }}><textarea value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submitMessage(); } }} placeholder={t.message} aria-label={t.message} rows={1} /><div className="composer-bottom"><span>Enter للإرسال · Shift + Enter لسطر جديد</span><div className="composer-tools"><input ref={fileRef} type="file" accept=".txt,.md,.csv,.json,.pdf,text/plain,text/markdown,application/json,application/pdf" onChange={importLocalFile} hidden /><button type="button" className="composer-tool" onClick={() => fileRef.current?.click()} aria-label="إرفاق ملف"><FileText size={14} /></button><button type="button" className={`composer-tool ${isListening ? "active" : ""}`} onClick={toggleListening} aria-label="إملاء صوتي"><Mic size={14} /></button><button type={isSending ? "button" : "submit"} className={`send-button ${isSending ? "stop" : ""}`} onClick={isSending ? stopGeneration : undefined}>{isSending ? <><Square size={14} fill="currentColor" />{t.stop}</> : <><Send size={15} />{t.send}</>}</button></div></div></form><div className="composer-note"><ShieldCheck size={13} /> لا يتم حفظ مفاتيح API. تحقّق من حالة المزوّد قبل إرسال معلومات حساسة.</div></div>
         </div>
       </main>
 
+      {panel === "tools" && <PanelShell title="الأدوات المجانية" icon={<Globe2 size={18} />} onClose={() => setPanel("none")}><div className="panel-intro">أدوات تعمل في المتصفح دون مفتاح API. الملفات تُحلّل محليًا، والبحث محدود بمصدر ويكيبيديا.</div><section className="tool-card"><h3><Search size={16} /> بحث ويكيبيديا</h3><div className="tool-search"><input value={toolsQuery} onChange={(event) => setToolsQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void runWikiSearch(); }} placeholder="ابحث عن موضوع…" /><button className="outline-button" onClick={() => void runWikiSearch()} disabled={toolsLoading}>{toolsLoading ? <Loader2 size={14} className="spin" /> : <Search size={14} />}</button></div>{wikiResults.length > 0 && <div className="wiki-results">{wikiResults.map((result) => <a key={result.url} href={result.url} target="_blank" rel="noreferrer"><strong>{result.title}</strong><span>{result.snippet}</span></a>)}</div>}</section><section className="tool-card"><h3><FileText size={16} /> قراءة ملف محلي</h3><p>TXT وMarkdown وCSV وJSON وPDF. بعد الاستخراج يُوضع النص في المحرر ولا يُرسل تلقائيًا.</p><button className="outline-button" onClick={() => fileRef.current?.click()}><Upload size={14} /> اختيار ملف</button></section><section className="tool-card"><h3><Volume2 size={16} /> الصوت في المتصفح</h3><p>استخدم زر الميكروفون للإملاء أو زر «صوت» بجانب أي رد. الدعم يعتمد على المتصفح.</p><button className="outline-button" onClick={() => { if (activeConversation) readAloud(activeConversation.messages.filter((item) => item.role === "assistant").at(-1)?.content ?? ""); }}>{"قراءة آخر رد"}</button><button className="outline-button" onClick={stopSpeaking}>إيقاف الصوت</button></section></PanelShell>}
       {panel === "providers" && <PanelShell title={t.providers} icon={<Settings2 size={18} />} onClose={() => setPanel("none")}><div className="panel-intro">أضف الاتصال في الذاكرة فقط. لا تُحفظ المفاتيح بعد إعادة التحميل.</div>{(Object.keys(providerMeta) as ProviderId[]).map((provider) => { const meta = providerMeta[provider]; const state = providerStates[provider]; const config = providerConfigs[provider]; return <section className="provider-card" key={provider}><div className="provider-card-head"><div><ProviderBadge provider={provider} /><h3>{meta.name}</h3></div><span className={`status-chip ${state.connected ? "success" : "muted"}`}><span />{state.connected ? t.connected : t.disconnected}</span></div><p>{meta.note}</p><label>عنوان الخدمة<input value={config.baseUrl} onChange={(event) => updateProvider(provider, { baseUrl: event.target.value })} /></label>{meta.mode === "cloud" && <label>مفتاح API <input type="password" autoComplete="off" value={config.apiKey ?? ""} onChange={(event) => updateProvider(provider, { apiKey: event.target.value })} placeholder="يبقى في الذاكرة فقط" /></label>}<div className="provider-card-foot"><button className="outline-button" onClick={() => checkConnection(provider)} disabled={state.checking}>{state.checking ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}{state.checking ? t.checking : t.check}</button><a href={meta.docs} target="_blank" rel="noreferrer">الوثائق <ChevronLeft size={13} /></a></div>{state.message !== "لم يُفحص بعد" && <small className={state.connected ? "success-text" : "error-text"}>{state.message}</small>}</section>; })}</PanelShell>}
       {panel === "models" && <PanelShell title={t.models} icon={<LayoutPanelLeft size={18} />} onClose={() => setPanel("none")}><div className="panel-intro">لا نعرض نموذجًا كمتاح حتى يجلبه المزوّد من مصدره الفعلي.</div>{(Object.keys(providerMeta) as ProviderId[]).map((provider) => <section className="model-provider-section" key={provider}><div className="section-line"><ProviderBadge provider={provider} /><span>{providerStates[provider].models.length} {t.available}</span></div>{providerStates[provider].models.length === 0 ? <div className="empty-models"><Database size={18} /><p>افحص الاتصال لإظهار النماذج الحية.</p></div> : providerStates[provider].models.map((model) => <button key={model.id} className={`model-row ${selectedModel === model.id && selectedProvider === provider ? "selected" : ""}`} onClick={() => { setSelectedProvider(provider); setSelectedModels((current) => ({ ...current, [provider]: model.id })); setPanel("none"); }}><span className="model-icon"><Bot size={15} /></span><span><strong>{model.name}</strong><small>{model.capabilities.join(" · ")}</small></span>{selectedModel === model.id && selectedProvider === provider && <Check size={15} />}</button>)}</section>)}</PanelShell>}
       {panel === "privacy" && <PanelShell title={t.privacy} icon={<ShieldCheck size={18} />} onClose={() => setPanel("none")}><div className="privacy-hero"><div className="privacy-icon"><ShieldCheck size={22} /></div><h3>{t.privacyTitle}</h3><p>{t.privacyText}</p></div><div className="setting-group"><h4>{t.history}</h4><label className="switch-row"><span><Database size={16} /><small>IndexedDB محليًا</small></span><input type="checkbox" checked={settings.saveHistory} onChange={(event) => setSettings((current) => ({ ...current, saveHistory: event.target.checked }))} /><i /></label></div><div className="setting-group"><h4>{t.appearance}</h4><div className="segmented"><button className={settings.theme === "dark" ? "active" : ""} onClick={() => setSettings((current) => ({ ...current, theme: "dark" }))}><Moon size={14} />{t.dark}</button><button className={settings.theme === "light" ? "active" : ""} onClick={() => setSettings((current) => ({ ...current, theme: "light" }))}><Sun size={14} />{t.light}</button></div></div><div className="setting-group"><h4>{t.language}</h4><div className="segmented"><button className={settings.locale === "ar" ? "active" : ""} onClick={() => setSettings((current) => ({ ...current, locale: "ar" }))}>{t.arabic}</button><button className={settings.locale === "en" ? "active" : ""} onClick={() => setSettings((current) => ({ ...current, locale: "en" }))}>{t.english}</button></div></div><button className="danger-button" onClick={clearData}><Trash2 size={15} />{t.clearData}</button><div className="privacy-note"><Info size={15} /><p>المفتاح الذي تدخله في المتصفح قابل للوصول من أدوات المطوّر. تخزينه في الذاكرة يقلل الأثر لكنه لا يحمي من XSS أو من جهاز مخترق.</p></div></PanelShell>}
