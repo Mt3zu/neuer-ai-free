@@ -1,14 +1,40 @@
 # Neuer AI — نوير للذكاء الاصطناعي
 
-React / Express / tRPC / Drizzle starter, adapted from the Sandbox web-db-user template.
+Neuer AI مساحة محادثة عربية، محلية أولًا، تجمع Ollama المحلي ومسارات OpenRouter وGroq السحابية الاختيارية في واجهة واحدة. الأولوية للوظائف القابلة للتحقق: لا توجد مفاتيح مشتركة، ولا نماذج مدفوعة مضمّنة، ولا انتقال تلقائي عند فشل المسار المجاني.
 
-- `pnpm dev`: development server; honors `PORT` (default 3000).
-- `pnpm build` / `pnpm start`: build and serve `dist/index.js` and `dist/public/`.
-- `pnpm db:migrate`: apply checked-in migrations. `pnpm db:push`: generate and apply new schema changes.
-- `pnpm check` / `pnpm test`: types and application tests.
+## ما يعمل في النسخة الحالية
 
-Start with the Webdev skill's default-template guide. Platform login, storage, payments and service contracts live in its shared references; read the relevant capability before extending its helper.
+تتضمن النسخة محرك محادثة ببث تدريجي وإلغاء عبر `AbortController`، حفظًا محليًا عبر IndexedDB، إعادة توليد وتعديل وحذف ونسخ الرسائل، بحثًا في السجل، إعادة تسمية المحادثات، وتصدير TXT وMarkdown وJSON مع استيراد وفحص بنية الملف. كما تتضمن تبديل العربية والإنجليزية، RTL، الوضع الداكن والفاتح، دعم تقليل الحركة، مركز الخصوصية، مستكشف النماذج، وإعدادات مزوّدين واضحة.
 
-`server/_core/publicConfig.ts` exposes only named public runtime values. Private keys stay server-side. The platform serves managed `/manus-storage/` assets; the application does not register a second proxy.
+تكامل Ollama يستخدم API المحلي الرسمي ويكتشف النماذج فعليًا من `/api/tags`. تكامل OpenRouter يعرض فقط النماذج التي تُرجع سعرًا صفريًا للمدخلات والمخرجات. تكامل Groq يتطلب مفتاح المستخدم ويُعامل كمسار مجاني ضمن الحصة الحالية، دون ضمان استمرار الشروط مستقبلًا.
 
-Platform configuration is readable and editable through `webdev.config`. Default settings are initial values, not enforced constraints. The agent may modify the files, commands and configuration or follow the flexible guide for another stack.
+## التشغيل المحلي
+
+```bash
+pnpm install --frozen-lockfile
+pnpm dev:static
+```
+
+افتح المعاينة ثم ادخل «المزوّدون». لتشغيل Ollama، ثبّته وشغّله ونزّل نموذجًا من أدوات Ollama الرسمية، ثم اضغط «فحص الاتصال». تنزيل النموذج يحتاج الإنترنت عادةً، بينما الاستدلال يمكن أن يعمل محليًا بعد اكتمال التنزيل.
+
+## الخصوصية
+
+المحادثات والإعدادات محلية في المتصفح. مفاتيح API اختيارية وتبقى في ذاكرة جلسة الصفحة ولا تُحفظ في IndexedDB أو النسخ الاحتياطية. المفتاح الذي يُدخل في المتصفح قابل للوصول من أدوات المطوّر، لذلك لا تستخدم مفتاحًا مشتركًا أو عالي الصلاحية. امسح الجلسة والبيانات المحلية من مركز الخصوصية عند الحاجة.
+
+## التحقق والبناء
+
+```bash
+pnpm check
+pnpm test
+pnpm build:static
+```
+
+اختبار الاتصال السحابي الحقيقي يحتاج مفتاحًا يضيفه المستخدم ولم يُنفذ تلقائيًا في بيئة البناء. اختبار Ollama الحقيقي يحتاج خدمة Ollama ونموذجًا محليًا. راجع `PROJECT_STATUS.md` و`TECHNICAL_DOCS.md` للتفاصيل والقيود.
+
+## النشر المجاني
+
+النسخة ثابتة ويمكن نشر مجلد `dist/public` على GitHub Pages أو Netlify أو Vercel ضمن شروط الخطة المجانية. لا يحتاج البناء إلى أسرار. لا تضع مفاتيح المستخدم في متغيرات بناء عامة، لأن قيم الواجهة النهائية قابلة للقراءة.
+
+## الحالة الصادقة
+
+لم يُرفع المستودع إلى GitHub ولم يُنشَر رابط عام في هذه المرحلة ما لم تُفعّل صلاحيات الربط والنشر. وجود ملفات إعداد لا يُعد دليلًا على نجاح النشر. تُحدّث حالة المشروع بعد كل فحص فعلي.
