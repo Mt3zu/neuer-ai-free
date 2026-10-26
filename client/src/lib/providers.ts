@@ -2,6 +2,12 @@ import type { ChatMessage, ModelInfo, ProviderConfig, ProviderId } from "./types
 import { DEFAULT_PROVIDER_URLS } from "./types";
 
 export const providerMeta: Record<ProviderId, { name: string; mode: "local" | "cloud"; docs: string; note: string }> = {
+  neuer: {
+    name: "Neuer AI",
+    mode: "cloud",
+    docs: "#",
+    note: "المساعد المدمج في Neuer AI. يعمل مباشرة دون مفتاح أو إعداد من المستخدم.",
+  },
   ollama: {
     name: "Ollama",
     mode: "local",
@@ -42,6 +48,9 @@ function toOpenAIMessage(message: ChatMessage) {
 }
 
 export async function discoverModels(config: ProviderConfig): Promise<ModelInfo[]> {
+  if (config.id === "neuer") {
+    return [{ id: "neuer-default", name: "Neuer AI · تلقائي", provider: "neuer", free: true, source: "live", capabilities: ["محادثة", "عربي", "بلا مفتاح"] }];
+  }
   const baseUrl = normalizeBaseUrl(config.baseUrl || DEFAULT_PROVIDER_URLS[config.id]);
   if (config.id === "ollama") {
     const response = await request(`${baseUrl}/api/tags`);
@@ -92,6 +101,18 @@ export async function chatWithProvider(
   onChunk: (chunk: string) => void,
   signal: AbortSignal,
 ) {
+  if (config.id === "neuer") {
+    const response = await request("/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: messages.map(toOpenAIMessage) }),
+      signal,
+    });
+    const body = (await response.json()) as { content?: string; error?: string };
+    if (!body.content) throw new Error(body.error || "لم يصل رد من Neuer AI.");
+    onChunk(body.content);
+    return;
+  }
   const baseUrl = normalizeBaseUrl(config.baseUrl || DEFAULT_PROVIDER_URLS[config.id]);
   if (config.id === "ollama") {
     const response = await request(`${baseUrl}/api/chat`, {

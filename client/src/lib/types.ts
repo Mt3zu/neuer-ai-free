@@ -1,6 +1,6 @@
 export type Locale = "ar" | "en";
 export type Theme = "dark" | "light";
-export type ProviderId = "ollama" | "openrouter" | "groq";
+export type ProviderId = "neuer" | "ollama" | "openrouter" | "groq";
 export type MessageRole = "user" | "assistant" | "system";
 
 export interface ChatMessage {
@@ -60,6 +60,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 };
 
 export const DEFAULT_PROVIDER_URLS: Record<ProviderId, string> = {
+  neuer: "/api/ai",
   ollama: "http://localhost:11434",
   openrouter: "https://openrouter.ai/api/v1",
   groq: "https://api.groq.com/openai/v1",

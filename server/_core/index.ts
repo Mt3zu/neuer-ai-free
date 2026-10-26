@@ -7,6 +7,7 @@ import { publicPlatformScript } from "./publicConfig";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { invokeLLM, type Message } from "./llm";
 
 async function startServer() {
   const app = express();
@@ -15,6 +16,30 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
+  app.post("/api/ai/chat", async (req, res) => {
+    try {
+      const messages: unknown[] = Array.isArray(req.body?.messages) ? req.body.messages : [];
+      if (messages.length === 0 || messages.length > 40) {
+        return res.status(400).json({ error: "أرسل رسالة واحدة على الأقل." });
+      }
+      const safeMessages: Message[] = messages
+        .filter((item: unknown): item is { role: Message["role"]; content: string } => Boolean(item && typeof item === "object" && "content" in item && typeof (item as { content?: unknown }).content === "string"))
+        .map((item) => ({ role: item.role, content: item.content.slice(0, 30_000) }));
+      const result = await invokeLLM({
+        messages: [
+          { role: "system", content: "أنت Neuer AI، مساعد عربي واضح وعملي. أجب بلغة المستخدم، وكن مفيدًا ومختصرًا دون طلب أي مفتاح API أو إعداد من المستخدم." },
+          ...safeMessages,
+        ],
+        maxTokens: 1400,
+      });
+      const content = result.choices?.[0]?.message?.content;
+      if (typeof content !== "string" || !content.trim()) return res.status(502).json({ error: "لم يصل رد صالح من المساعد. أعد المحاولة." });
+      return res.json({ content });
+    } catch (error) {
+      console.error("Built-in AI error", error);
+      return res.status(503).json({ error: "المساعد المدمج غير متاح مؤقتًا. أعد المحاولة بعد لحظات." });
+    }
+  });
   app.get("/api/platform/config.js", (_req, res) => {
     res.set("Cache-Control", "no-store").type("application/javascript").send(publicPlatformScript());
   });
